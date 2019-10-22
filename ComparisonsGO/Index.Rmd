@@ -1,0 +1,34 @@
+---
+title: "ComparisonsGO Project"
+output: html_document
+---
+
+
+# RNA-Seq Analysis for ComparisonGO Project:
+
+
+Comparison A: Felce resting v stimulated VS Zhao 0h v 2h
+
+Comparison B: Felce resting v stimulated VS Zhao 0h v 24h
+
+Comparison C: Felce resting v stimulated VS Lucic resting v activated
+
+Comparison D: Zhao 0h v 24h VS Lucic resting v activated
+
+Comparison E: Zhao 0h v 2h VS Zhao 0h v 24h
+
+Using +/- 1 LFC Venn lists, separate each one to:
+
+A Felce only, A Zhao only, A Both
+
+B Felce only, B Zhao only, B Both
+
+C Felce only, C Lucic only, C Both
+
+D Zhao only, D Lucic only, D Both
+
+E Zhao 2h only, E Zhao 24h only, E Both
+
+2 x lists for each one (up/down)
+
+Do Gene Ontology for each comparison - biological process, cellular component, molecular function.

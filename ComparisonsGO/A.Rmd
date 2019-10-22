@@ -1,0 +1,372 @@
+---
+title: "A"
+output: html_document
+---
+
+# Gene ontology and gene set enrichment analysis
+Pathway analysis using code from Rbio Session 4. Gene ontology, network analysis and gene set enrichment analysis using ClusterProfiler.
+
+Update: 2nd August 2019
+
+Analysis - simplified BP only for Felce only, Zhao only and Both (up/downregulated)
+
+Note: used simplify() for every analysis - if editing and want to Knit to HTML, will take a long time!
+
+
+```{r, include=FALSE}
+
+library(limma)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(pathview)
+library(fgsea)
+library(readr)
+
+#Go to Rbio.Rmd file to load full list, including installing packages etc. If having trouble, install individual packages using CRAN within R Studio. If still having trouble, then have to search Bioconductor for it.
+
+```
+# Data editing to create separate gene lists
+```{r}
+
+#Downregulated genes
+A_down <- read_csv("total_results/A_down.csv")
+
+#Create Felce only - remove anything where Zhao_LFC does not equal 0. (The ! at the front is for removing things!)
+A_down_felce <- A_down[!(A_down$zhao_LFC !=0),]
+
+#Create Zhao only - remove anything where Felce_LFC does not equal 0
+A_down_zhao <- A_down[!(A_down$felce_LFC !=0),]
+
+#Create Both - include anything where both LFC are smaller than 0
+A_down_both <- A_down[(A_down$felce_LFC < 0 & A_down$zhao_LFC < 0),]
+
+write.csv(A_down_felce,"results/A_down_felce.csv")
+write.csv(A_down_zhao,"results/A_down_zhao.csv")
+write.csv(A_down_both,"results/A_down_both.csv")
+
+#Upregulated genes
+A_up <- read_csv("total_results/A_up.csv")
+
+#Create Felce only - remove anything where Zhao_LFC does not equal 0. (The ! at the front is for removing things!)
+A_up_felce <- A_up[!(A_up$zhao_LFC !=0),]
+
+#Create Zhao only - remove anything where Felce_LFC does not equal 0
+A_up_zhao <- A_up[!(A_up$felce_LFC !=0),]
+
+#Create Both - include anything where both LFC are larger than 0
+A_up_both <- A_up[(A_up$felce_LFC > 0 & A_up$zhao_LFC > 0),]
+
+write.csv(A_up_felce,"results/A_up_felce.csv")
+write.csv(A_up_zhao,"results/A_up_zhao.csv")
+write.csv(A_up_both,"results/A_up_both.csv")
+
+
+
+```
+
+# Gene Ontology
+
+## Felce only
+
+Filter data
+```{r}
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+A_up_felce$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(A_up_felce$gene), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+A_up_felce <- A_up_felce[is.na(A_up_felce$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+A_up_felce <- A_up_felce[!duplicated(A_up_felce$Entrez.Gene),]
+
+```
+
+### Gene Ontology (GO) over-representation test - Felce Upregulated genes, Biological Process
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+geneset <- as.character(A_up_felce$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(geneset)
+
+#This will take a little while to run
+ego <- enrichGO(gene = geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+#dimensions - number of GO terms
+dim(ego)
+
+#Only 6 terms - don't need to simplify!
+#ego <- simplify(ego)
+
+#Export list of biological processes and genes involved
+A_up_felce_BP <- data.frame(ego$ID, ego$Description, ego$p.adjust, ego$geneID)
+
+write.csv(A_up_felce_BP, file="GO/A_up_felce_BP_simplified.csv")
+
+```
+
+```{r,fig.height=6, fig.width=8}
+barplot (ego, showCategory = 10)
+
+dotplot (ego, showCategory=10)
+
+```
+
+```{r, fig.height=6, fig.width=8}
+emapplot(ego)
+
+```
+
+```{r, fig.height=12, fig.width=14}
+#logFC is optional, but if available will colour-code the nodes
+logFC <- A_up_felce$felce_LFC
+#set name of object
+names(logFC) <- A_up_felce$Entrez.Gene
+head(logFC)
+
+cnetplot(ego, foldChange = logFC, showCategory = 10, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
+
+## Zhao only
+
+Filter data
+```{r}
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+A_down_zhao$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(A_down_zhao$gene), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+A_down_zhao <- A_down_zhao[is.na(A_down_zhao$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+A_down_zhao <- A_down_zhao[!duplicated(A_down_zhao$Entrez.Gene),]
+
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+A_up_zhao$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(A_up_zhao$gene), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+A_up_zhao <- A_up_zhao[is.na(A_up_zhao$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+A_up_zhao <- A_up_zhao[!duplicated(A_up_zhao$Entrez.Gene),]
+
+```
+
+### Gene Ontology (GO) over-representation test - Zhao Downregulated, Biological Process
+We are going to perform an over-representation test for our genes in GO terms from org.Hs.eg.db
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+geneset <- as.character(A_down_zhao$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(geneset)
+
+#This will take a little while to run
+ego <- enrichGO(gene = geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+#dimensions - number of GO terms
+dim(ego)
+
+#Only 2 terms, don't need to simplify!
+#ego <- simplify(ego)
+
+
+#Export list of biological processes and genes involved
+A_down_zhao_BP <- data.frame(ego$ID, ego$Description, ego$p.adjust, ego$geneID)
+
+write.csv(A_down_zhao_BP, file="GO/A_down_zhao_BP_simplified.csv")
+
+
+```
+
+```{r,fig.height=4, fig.width=6}
+barplot (ego, showCategory = 10)
+
+dotplot (ego, showCategory=10)
+
+
+```
+
+
+```{r, fig.height=8, fig.width=10}
+emapplot(ego)
+
+```
+
+```{r, fig.height=12, fig.width=14}
+#logFC is optional, but if available will colour-code the nodes
+logFC <- A_down_zhao$zhao_LFC
+#set name of object
+names(logFC) <- A_down_zhao$Entrez.Gene
+head(logFC)
+
+cnetplot(ego, foldChange = logFC, showCategory = 10, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
+### Gene Ontology (GO) over-representation test - Zhao Upregulated, Biological Process
+We are going to perform an over-representation test for our genes in GO terms from org.Hs.eg.db
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+geneset <- as.character(A_up_zhao$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(geneset)
+
+#This will take a little while to run
+ego <- enrichGO(gene = geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+ego <- simplify (ego)
+
+#dimensions - number of GO terms
+dim(ego)
+
+#Export list of biological processes and genes involved
+A_up_zhao_BP <- data.frame(ego$ID, ego$Description, ego$p.adjust, ego$geneID)
+
+write.csv(A_up_zhao_BP, file="GO/A_up_zhao_BP_simplified.csv")
+
+
+```
+
+
+```{r,fig.height=6, fig.width=8}
+barplot (ego, showCategory = 10)
+
+dotplot (ego, showCategory=10)
+
+```
+
+
+```{r, fig.height=12, fig.width=14}
+emapplot(ego)
+
+```
+
+
+```{r, fig.height=12, fig.width=14}
+#logFC is optional, but if available will colour-code the nodes
+logFC <- A_up_zhao$zhao_LFC
+#set name of object
+names(logFC) <- A_up_zhao$Entrez.Gene
+head(logFC)
+
+cnetplot(ego, foldChange = logFC, showCategory = 10, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
+
+## Both
+
+Filter data
+```{r}
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+A_up_both$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(A_up_both$gene), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+A_up_both <- A_up_both[is.na(A_up_both$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+A_up_both <- A_up_both[!duplicated(A_up_both$Entrez.Gene),]
+
+```
+
+
+### Gene Ontology (GO) over-representation test - Both Upregulated, Biological Process
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+geneset <- as.character(A_up_both$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(geneset)
+
+#This will take a little while to run
+ego <- enrichGO(gene = geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+ego <- simplify(ego)
+
+#dimensions - number of GO terms
+dim(ego)
+
+#Export list of biological processes and genes involved
+A_up_both_BP <- data.frame(ego$ID, ego$Description, ego$p.adjust, ego$geneID)
+
+write.csv(A_up_both_BP, file="GO/A_up_both_BP_simplified.csv")
+
+
+```
+
+```{r,fig.height=6, fig.width=8}
+barplot (ego, showCategory = 10)
+
+dotplot (ego, showCategory=10)
+
+```
+
+
+```{r, fig.height=8, fig.width=10}
+emapplot(ego)
+
+```
+
+
+```{r, fig.height=12, fig.width=14}
+#logFC is optional, but if available will colour-code the nodes
+logFC <- A_up_both$felce_LFC
+#set name of object
+names(logFC) <- A_up_both$Entrez.Gene
+head(logFC)
+
+cnetplot(ego, foldChange = logFC, showCategory = 10, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
