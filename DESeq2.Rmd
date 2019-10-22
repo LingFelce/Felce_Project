@@ -1,0 +1,265 @@
+---
+title: "Differential expression using DESeq2"
+output: html_document
+---
+
+
+Update: 1st July 2019
+
+# Differential gene expression using DESeq2
+Differential gene expression using DESeq2 and visualisation with Venn diagrams. Using Adam's code, some from https://www.bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+
+If need to use Biomart to map gene symbols from Ensembl IDs, then use functions_biomart.R instead of functions.R
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+```
+
+
+```{r read count and metadata}
+
+#Upload read count file
+df_mRNA <- read.table("genes.csv", sep=",", header = TRUE, row.names=NULL)
+
+#Upload meta data file
+meta_data <- read.table("meta_data.csv", sep=",", header = TRUE)
+
+#Change row names to become sample names
+rownames(meta_data) <- meta_data$Sample
+
+#Convert row names to Ensembl IDs
+rownames(df_mRNA) <- df_mRNA$Geneid
+
+#I think this is to rename the column names after sample names from metadata file, but seems to get rid of Geneid column (Ensembl IDs?) - therefore have to set row names as Ensembl IDs!
+gene_counts <- df_mRNA[,rownames(meta_data)]
+
+#df_mRNA = df_mRNA[,rownames(meta_data)]
+
+#Do rownames of metadata match column names of read count file
+all(rownames(meta_data) %in% colnames(df_mRNA))
+
+#Doesn't seem to allow setting Symbols as row names as says duplicate row names not allowed.
+
+#convert Ensembl ID to gene symbol here
+#df_mRNA$Symbol <- mapIds(org.Hs.eg.db, keys=as.character(df_mRNA$Geneid), keytype="ENSEMBL", column="SYMBOL")
+
+#Get rid of any rows with NA
+#df_mRNA <- df_mRNA[!is.na(df_mRNA$Symbol), ]
+
+
+```
+
+
+```{r metadata}
+# set up meta_data for all experiments (only have 1 comparison)
+
+meta_data_1 <- meta_data %>% 
+  filter(Cell_line == "Jurkat") %>% 
+  column_to_rownames("Sample")
+
+#meta_data_2 <- meta_data %>%
+  #filter (Cell_line =="Other") %>%
+  #column_to_rownames("Sample")
+
+
+
+```
+
+
+
+
+```{r DESeq}
+## Set up the DESeq2 object
+
+run_deseq2 <- function(df_mRNA, meta_data, control="resting", test="stim", value){
+
+  df_mRNA = df_mRNA[,rownames(meta_data)]
+  
+  
+  dds<- DESeqDataSetFromMatrix(countData=df_mRNA,
+                               colData=meta_data,
+                               design= ~Condition)
+  
+  keep <- rowSums(counts(dds)) >= 10
+  dds <- dds[keep,]
+  
+  dds <- DESeq(dds)
+  
+  res <- results(dds, contrast = c(value, test,control))
+  
+  return(res)
+}
+
+de_res <- run_deseq2(as.data.frame(gene_counts), meta_data_1, control = "resting", test="stim", value="Condition")
+
+#Keep code below if running multiple comparisons
+
+#Too many objects called res later, so this "master" results is de_res (differential expression results. Obviously)
+
+#res <- run_deseq2(as.data.frame(genes), meta_data_1, control = "neg", test="ko2", value="Condition")
+
+
+
+```
+
+The following describes the analysis of the data using DEseq2. I have separated the analyses into the four different contrasts and have plotted summary statistics and MA plots for each.  
+
+
+## Summary of the data {.tabset .tabset-fade}
+
+### Resting vs Stimulated Jurkats
+
+```{r summary}
+summary(de_res, alpha=0.05)
+```
+
+### Other comparisons
+
+```{r}
+#summary(res, alpha=0.05)
+```
+
+
+## MA (mean average) plots {.tabset .tabset-fade}
+
+In DESeq2, the function plotMA shows the log2 fold changes attributable to a given variable over the mean of normalized counts for all the samples in the DESeqDataSet. Points will be colored red if the adjusted p value is less than 0.01. Points which fall out of the window are plotted as open triangles pointing either up or down.
+
+### Resting vs Stimulated Jurkats
+
+```{r MA plot}
+DESeq2::plotMA(de_res)
+```
+
+### Other comparisons
+
+```{r}
+#DESeq2::plotMA(res)
+```
+
+
+
+# Volcano plots {.tabset .tabset-fade}
+
+## Resting vs Stimulated Jurkats
+
+```{r volcano}
+
+library("ggplot2") #Best plots
+library("ggrepel") #Avoid overlapping labels
+
+
+test <- as.data.frame(de_res)
+  
+data <- as.vector(rownames(test))
+annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   columns="SYMBOL", keytype = "ENSEMBL")
+  
+result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+res <- result %>% 
+    dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    na.omit()
+  
+
+mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+input <- cbind(gene=rownames(mutateddf), mutateddf )
+input <- input %>% 
+  arrange(input$padj)
+
+symbol_data <- head(input, 100)
+symbol_data <- input %>% 
+  filter(SYMBOL == "CD69" | SYMBOL == "IL2RA" | SYMBOL == "IFNG" | SYMBOL == "IL2")
+
+#convert the rownames to a column
+volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    geom_point(aes(col=sig)) + #add points colored by significance
+geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      ggtitle("Resting v Stimulated") #e.g. 'Volcanoplot DESeq2'
+volc+geom_text_repel(data=symbol_data, aes(label=`SYMBOL`)) + scale_colour_Publication() + theme_bw()#adding text for the genes
+
+
+#Save Volcano Plot
+ggsave("volcano/RestvsStimplot.jpeg", device="jpeg") #In case you want to easily save to disk
+
+
+```
+
+## Other Comparisons
+
+```{r}
+
+#library("ggplot2") #Best plots
+#library("ggrepel") #Avoid overlapping labels
+
+
+#test <- as.data.frame(res_MCF2)
+  
+#data <- as.vector(rownames(test))
+#annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   #columns="SYMBOL", keytype = "ENSEMBL")
+  
+#result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+#res <- result %>% 
+    #dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    #na.omit()
+  
+
+#mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+#input <- cbind(gene=rownames(mutateddf), mutateddf )
+#input <- input %>% 
+  #arrange(input$padj)
+
+#symbol_data <- head(input, 100)
+
+#convert the rownames to a column
+#volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    #geom_point(aes(col=sig)) + #add points colored by significance
+#geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      #ggtitle("MCF-7 MLLT1 Clone 2") #e.g. 'Volcanoplot DESeq2'
+#volc
+
+#Save Volcano Plot
+#ggsave("volcano/MCF2Volcanoplot.jpeg", device="jpeg") #In case you want to easily save to disk
+
+
+```
+
+
+## Results tables
+
+The folowing results tables show the significant genes. Filtering has been performed with a log2 fold change +/- 2.
+
+
+### Resting vs Stimulated Jurkats
+
+```{r significant genes}
+
+
+dt <- filter_genes(as.data.frame(de_res), name="rest_vs_stim")
+
+
+
+
+
+datatable(dt$sig)
+
+
+```
+
+
+### Other comparisons
+
+```{r}
+#dt <- filter_genes(as.data.frame(res_MCF2), name="MCF2")
+
+
+#datatable(dt$sig)
+```
+
+No Venn diagram as only one comparison!

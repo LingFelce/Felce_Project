@@ -1,0 +1,177 @@
+---
+title: "Differential expression using edgeR"
+output: html_document
+---
+
+
+# Differential gene expression using edgeR
+Differential gene expression using limma, Glimma and edgeR - originally from older version of this Bioconductor tutorial https://bioconductor.org/packages/release/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
+
+Also from here: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4934518/pdf/f1000research-5-9996.pdf
+
+Visualisation using heatmap and Venn diagrams.
+
+Update: 1st July 2019
+
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(edgeR)
+library(DEFormats)
+library(statmod)
+library(stringi)
+library(BiocParallel)
+library(gplots)
+library (limma)
+```
+
+``` {r read count and metadata}
+#Upload read count file
+GenewiseCounts <- read.table("genes.csv", sep=",", header = TRUE, row.names=NULL)
+
+
+#Remove other columns (not interested in soluble or adherent)
+genes <- GenewiseCounts[,(1:5)]
+
+#Set up groups (metadata)
+rest <- genes [, c("R1", "R2")]
+stim <- genes [, c("P1", "P2")]
+
+group=rep(c("rest", "stim"),each=2)
+
+```
+
+
+``` {r edgeR}
+#Construct DGElist object
+list <- DGEList(genes[,-1], group=group, genes=genes[,1,drop=FALSE])
+
+#Convert Ensembl IDs to gene symbols
+list$genes$Symbol <- mapIds(org.Hs.eg.db, keys=as.character(list$genes$Geneid), keytype="ENSEMBL", column="SYMBOL")
+
+#Get rid of NA
+list <- list[!is.na(list$genes$Symbol), ]
+
+#Comparison design - rest v stim
+design <- model.matrix(~0+group)
+colnames(design) <- gsub("group", "", colnames(design))
+
+#Filter genes by expression level - determine which genes have sufficiently large counts to be retained in statistical analysis
+keep <- filterByExpr(list, design)
+
+#Relcalulcation of library sizes
+list <- list[keep, , keep.lib.sizes=FALSE]
+
+list <- calcNormFactors(list)
+
+```
+
+# Quality control
+
+Mean difference plot - compares sample 1 with other samples
+
+```{r quality control}
+plotMD(list,column=1)
+abline(h=0, col="red", lty=2, lwd=2)
+```
+
+Mean difference plot - compares sample 2 with other samples
+
+```{r}
+plotMD(list,column=2)
+abline(h=0, col="red", lty=2, lwd=2)
+```
+
+Mean difference plot - compares sample 3 with other samples
+
+```{r}
+plotMD(list,column=3)
+abline(h=0, col="red", lty=2, lwd=2)
+```
+
+Mean difference plot - compares sample 4 with other samples
+
+```{r}
+plotMD(list,column=4)
+abline(h=0, col="red", lty=2, lwd=2)
+```
+
+Estimation of dispersion
+
+```{r dispersion}
+list <- estimateDisp(list, design, robust=TRUE)
+plotBCV(list)
+
+```
+
+
+# Differential gene expression: Resting vs Stimulated Jurkats
+
+``` {r}
+
+fit <- glmQLFit(list, design, robust=TRUE)
+
+restvstim<- makeContrasts(stim-rest, levels=design)
+res <- glmQLFTest(fit, contrast=restvstim)
+
+
+is.de <- decideTestsDGE(res)
+
+
+```
+
+Mean difference plot showing log-fold change and average abundance of each gene. Significantly up and down DE genes highlighted in red and blue respectively.
+
+```{r}
+plotMD(res, status=is.de, values=c(1,-1), col=c("red","blue"),
+       legend="topright")
+
+#Differential expression above a fold-change threshold
+
+
+tr <- glmTreat(fit, contrast=restvstim, lfc=log2(1.5))
+```
+
+Number of differentially regulated genes
+
+``` {r}
+summary(is.de)
+```
+
+
+
+
+## Heatmap to show differential gene expression of Resting vs Stimulated Jurkats
+
+``` {r}
+
+#Generate heatmap - convert read counts to log2-CPM.
+logCPM <- cpm(list, prior.count=2, log=TRUE)
+rownames(logCPM) <- list$genes$Symbol
+colnames(logCPM) <- paste(list$samples$group, 1:2, sep="-")
+
+#Look at top 30 DG genes. Scale so mean = 0, SD = 1 so that heatmap displays relative change for each gene
+o <- order(tr$table$PValue)
+logCPM <- logCPM[o[1:30],]
+logCPM <- t(scale(t(logCPM)))
+
+#Generate actual heatmap
+library(gplots)
+col.pan <- colorpanel(100, "blue", "white", "red")
+heatmap.2(logCPM, col=col.pan, Rowv=TRUE, scale="row", 
+          trace="none", dendrogram="both", cexRow=0.75, cexCol=0.75, density.info="none")
+```
+
+# Exporting significant gene lists
+
+```{r}
+all_res <- topTags(res, n=Inf)
+sig_res <- all_res[all_res$table$FDR < 0.05,]
+write.csv(all_res, file="edgeR_results/rest_v_stim_res.csv")
+write.csv(sig_res, file="edgeR_results/rest_v_stim_sig.csv")
+
+```
+

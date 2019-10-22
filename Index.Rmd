@@ -1,0 +1,16 @@
+---
+title: "Jurkat Project"
+output: html_document
+---
+
+
+# RNA-Seq Analysis for Jurkat cells:
+
+R1 and R2: resting
+
+P1 and P2: stimulated
+
+S1 and S2: soluble
+
+(A1 and A2: adherent)
+
