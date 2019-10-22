@@ -1,0 +1,104 @@
+---
+title: "Comparison 2"
+output: html_document
+---
+
+
+Update: 18th July 2019
+
+# Comparison 2: Lucic resting v Blueprint
+Using raw read counts or FPKM
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+library(readr)
+```
+
+```{r lucic}
+
+#Upload Lucic genes and keep resting samples only
+lucic_original <- read_csv("lucic_genes.csv")
+lucic_resting <- lucic_original[c("Geneid","41_resting","42_resting","44_resting")]
+
+#Remove rows of less than 10
+lucic_resting <- lucic_resting[rowSums(lucic_resting < 10)==0, ]
+
+#Average resting counts 
+lucic_resting$counts <- rowMeans(lucic_resting[c("41_resting","42_resting","44_resting")])
+
+```
+
+```{r blueprint}
+#Upload Blueprint genes
+blueprint_original <- read_csv ("blueprint_genes.csv")
+
+#Rename column 2 counts
+names(blueprint_original)[2]<-"counts"
+
+#Remove rows of less than 0.05
+blueprint_edit <- blueprint_original[rowSums(blueprint_original < 0.05)==0, ]
+blueprint_edit <- na.omit(blueprint_edit)
+
+#Convert type from "character" to "numeric"
+blueprint_edit[2] <- sapply(blueprint_edit[2], as.numeric)
+
+
+```
+
+# Venn diagrams
+ 
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+lucic <- lucic_resting %>% 
+  select(Geneid, counts)
+blueprint <- blueprint_edit %>% 
+  select(Geneid, counts)
+
+lucic_v_blueprint <- merge(lucic, blueprint, by="Geneid", all = TRUE)
+
+lucic_v_blueprint <- lucic_v_blueprint %>% 
+  mutate(lucic_counts = counts.x, blueprint_counts = counts.y) %>% 
+  select(-counts.x, -counts.y)
+
+lucic_v_blueprint[is.na(lucic_v_blueprint)] <- 0
+lucic_v_blueprint <- na.omit(lucic_v_blueprint)
+
+lucic_venn <- (lucic_v_blueprint$lucic_counts > 10)
+blueprint_venn <- (lucic_v_blueprint$blueprint_counts > 0.05)
+
+
+c2 <- cbind(lucic_venn, blueprint_venn)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/2_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/2_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+lucic_v_blueprint <- ensembl_to_symbol(lucic_v_blueprint, "Geneid")
+comparison_2 <- lucic_v_blueprint[complete.cases(lucic_v_blueprint),]
+
+
+write.csv(comparison_2, file="venn/2_list.csv")
+```
+

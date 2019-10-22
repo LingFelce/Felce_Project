@@ -1,0 +1,304 @@
+---
+title: "Comparison D"
+output: html_document
+---
+
+
+Update: 8th July 2019
+
+# Comparison D: Zhao 0h v 24h VS Lucic resting v activated +/- 1 log2 fold change
+Using DESeq2 total gene lists
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+```
+
+```{r upload DESeq2 genes}
+
+zhao <- read_csv("D_rest_vs_24h_res.csv")
+lucic <- read_csv ("D_rest_vs_activated_res.csv")
+
+#Use Row.names to be actual rownames (Ensembl IDs)
+
+zhao_names <- zhao$Row.names
+lucic_names <- lucic$Row.names
+
+rownames(zhao) <- make.names (zhao_names, unique=TRUE)
+rownames(lucic) <- make.names(lucic_names, unique=TRUE)
+
+
+```
+
+```{r separate up or downregulated}
+
+#downregulated
+
+zhao_down <- zhao %>%
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange < -1)
+
+lucic_down <- lucic %>%
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange < -1)
+
+#upregulated
+
+zhao_up <- zhao %>%
+  rownames_to_column("gene") %>%
+  filter (log2FoldChange > 1)
+
+lucic_up <- lucic %>%
+  rownames_to_column("gene") %>%
+  filter (log2FoldChange > 1)
+
+
+```
+
+
+# Venn diagrams
+### Shared downregulated genes 
+
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+zhao_down <- zhao_down %>% 
+  select(gene, log2FoldChange)
+lucic_down <- lucic_down %>% 
+  select(gene, log2FoldChange)
+
+merge_down <- merge(zhao_down, lucic_down, by="gene", all = TRUE)
+
+merge_down <- merge_down %>% 
+  mutate(zhao_LFC = log2FoldChange.x, lucic_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_down[is.na(merge_down)] <- 0
+
+zhao <- (merge_down$zhao_LFC < -1)
+lucic <- (merge_down$lucic_LFC < -1)
+
+c2 <- cbind(zhao, lucic)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/D_downregulated_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/D_downregulated_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_down <- ensembl_to_symbol(merge_down, "gene")
+down <- merge_down[complete.cases(merge_down),]
+
+
+write.csv(down, file="venn/D_down.csv")
+```
+
+### Shared upregulated genes 
+```{r venn up}
+
+library(reshape)
+library(reshape2)
+
+
+zhao_up <- zhao_up %>% 
+  select(gene, log2FoldChange)
+lucic_up <- lucic_up %>% 
+  select(gene, log2FoldChange)
+
+merge_up <- merge(zhao_up, lucic_up, by="gene", all = TRUE)
+
+merge_up <- merge_up %>% 
+  mutate(zhao_LFC = log2FoldChange.x, lucic_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_up[is.na(merge_up)] <- 0
+
+zhao <- (merge_up$zhao_LFC > 1)
+lucic <- (merge_up$lucic_LFC > 1)
+
+c2 <- cbind(zhao, lucic)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/D_upregulated_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/D_upregulated_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_up <- ensembl_to_symbol(merge_up, "gene")
+up <- merge_up[complete.cases(merge_up),]
+
+
+write.csv(up, file="venn/D_up.csv")
+
+```
+
+# Comparison D: Zhao 0h v 24h VS Lucic resting v activated +/- 0 log2 fold change
+Update: 18th July 2019
+
+```{r upload genes}
+
+zhao <- read_csv("D_rest_vs_24h_res.csv")
+lucic <- read_csv ("D_rest_vs_activated_res.csv")
+
+#Use Row.names to be actual rownames (Ensembl IDs)
+
+zhao_names <- zhao$Row.names
+lucic_names <- lucic$Row.names
+
+rownames(zhao) <- make.names (zhao_names, unique=TRUE)
+rownames(lucic) <- make.names(lucic_names, unique=TRUE)
+
+
+```
+
+```{r separate up or down}
+
+#downregulated
+
+zhao_down <- zhao %>%
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange < 0)
+
+lucic_down <- lucic %>%
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange < 0)
+
+#upregulated
+
+zhao_up <- zhao %>%
+  rownames_to_column("gene") %>%
+  filter (log2FoldChange > 0)
+
+lucic_up <- lucic %>%
+  rownames_to_column("gene") %>%
+  filter (log2FoldChange > 0)
+
+
+```
+
+
+# Venn diagrams
+### Shared downregulated genes 
+
+```{r down}
+library(reshape)
+library(reshape2)
+
+
+zhao_down <- zhao_down %>% 
+  select(gene, log2FoldChange)
+lucic_down <- lucic_down %>% 
+  select(gene, log2FoldChange)
+
+merge_down <- merge(zhao_down, lucic_down, by="gene", all = TRUE)
+
+merge_down <- merge_down %>% 
+  mutate(zhao_LFC = log2FoldChange.x, lucic_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_down[is.na(merge_down)] <- 0
+
+zhao <- (merge_down$zhao_LFC < 0)
+lucic <- (merge_down$lucic_LFC < 0)
+
+c2 <- cbind(zhao, lucic)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/D_downregulated_venn_new.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/D_downregulated_venn_new.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_down <- ensembl_to_symbol(merge_down, "gene")
+down <- merge_down[complete.cases(merge_down),]
+
+
+write.csv(down, file="venn/D_down_new.csv")
+```
+
+### Shared upregulated genes 
+```{r up}
+
+library(reshape)
+library(reshape2)
+
+
+zhao_up <- zhao_up %>% 
+  select(gene, log2FoldChange)
+lucic_up <- lucic_up %>% 
+  select(gene, log2FoldChange)
+
+merge_up <- merge(zhao_up, lucic_up, by="gene", all = TRUE)
+
+merge_up <- merge_up %>% 
+  mutate(zhao_LFC = log2FoldChange.x, lucic_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_up[is.na(merge_up)] <- 0
+
+zhao <- (merge_up$zhao_LFC > 0)
+lucic <- (merge_up$lucic_LFC > 0)
+
+c2 <- cbind(zhao, lucic)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/D_upregulated_venn_new.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/D_upregulated_venn_new.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_up <- ensembl_to_symbol(merge_up, "gene")
+up <- merge_up[complete.cases(merge_up),]
+
+
+write.csv(up, file="venn/D_up_new.csv")
+
+```

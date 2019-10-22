@@ -1,0 +1,22 @@
+---
+title: "Comparisons Project"
+output: html_document
+---
+
+
+# RNA-Seq Analysis for Comparison Project:
+
+
+Comparison A: Felce resting v stimulated VS Zhao 0h v 2h
+
+Comparison B: Felce resting v stimulated VS Zhao 0h v 24h
+
+Comparison C: Felce resting v stimulated VS Lucic resting v activated
+
+Comparison D: Zhao 0h v 24h VS Lucic resting v activated
+
+Comparison 1: Felce resting v Encode v Expression Atlas
+
+Comparison 2: Lucic resting v Blueprint
+
+Comparison 3: Lucic resting v Zhao 0h

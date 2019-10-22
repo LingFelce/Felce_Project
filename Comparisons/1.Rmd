@@ -1,0 +1,168 @@
+---
+title: "Comparison 1"
+output: html_document
+---
+
+
+Update: 17th July 2019
+
+# Comparison 1: Felce resting v Encode v Expression Atlas
+Using raw read counts or FPKM
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+library(readr)
+```
+
+```{r felce}
+
+#Upload Felce genes and keep resting samples only
+felce_original <- read_csv("felce_genes.csv")
+felce_resting <- felce_original[1:3]
+
+#Remove rows of less than 10
+felce_resting <- felce_resting[rowSums(felce_resting < 10)==0, ]
+
+#Use Geneid to be actual rownames (Ensembl IDs)
+felce_names <- felce_resting$Geneid
+rownames(felce_resting) <- make.names (felce_names, unique=TRUE)
+felce_resting$Geneid <- NULL
+
+#Average R1 and R2 
+felce_resting$counts <- rowMeans(felce_resting[c("R1","R2")])
+
+```
+
+```{r encode}
+#Upload Encode genes
+encode_original <- read_csv ("encode_genes.csv")
+
+#Remove rows of less than 0.05
+encode_edit <- encode_original[rowSums(encode_original < 0.05)==0, ]
+encode_edit <- na.omit(encode_edit)
+
+#Use Geneid to be actual rownames (Ensembl IDs)
+encode_names <- encode_edit$Geneid
+rownames(encode_edit) <- make.names (encode_names, unique=TRUE)
+encode_edit$Geneid <- NULL
+
+#Rename column 1 Set 1
+names(encode_edit)[1]<-"Set1"
+
+#Rename column 2 Set 2
+names(encode_edit)[2]<-"Set2"
+
+#Convert type from "character" to "numeric"
+encode_edit[1:2] <- sapply(encode_edit[1:2], as.numeric)
+
+#Average R1 and R2 
+encode_edit$counts <- rowMeans(encode_edit[c("Set1","Set2")])
+
+```
+
+```{r expression atlas}
+
+#Upload Expression Atlas genes
+atlas_original <- read_csv("atlas_genes.csv")
+
+#Remove rows of less than 0.05
+atlas_edit <- atlas_original[rowSums(atlas_original < 0.05)==0, ]
+
+#Use Geneid to be actual rownames (Ensembl IDs)
+atlas_names <- atlas_edit$Geneid
+rownames(atlas_edit) <- make.names (atlas_names, unique=TRUE)
+atlas_edit$Geneid <- NULL
+
+#Convert type from "character" to "numeric"
+atlas_edit[1] <- sapply(atlas_edit[1], as.numeric)
+
+#Rename column 1 counts
+names(atlas_edit)[1]<-"counts"
+
+```
+
+```{r rename rows}
+
+#Rename rows "gene"
+felce <- felce_resting %>%
+  rownames_to_column("gene") 
+
+encode <- encode_edit %>%
+  rownames_to_column("gene") 
+
+atlas <- atlas_edit %>%
+  rownames_to_column("gene")
+
+
+
+```
+
+
+# Venn diagrams
+ 
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+felce <- felce %>% 
+  select(gene, counts)
+encode <- encode %>% 
+  select(gene, counts)
+atlas <- atlas %>%
+  select(gene, counts)
+
+felce_v_encode <- merge(felce, encode, by="gene", all = TRUE)
+
+felce_v_encode <- felce_v_encode %>% 
+  mutate(felce_counts = counts.x, encode_counts = counts.y) %>% 
+  select(-counts.x, -counts.y)
+
+felce_v_encode[is.na(felce_v_encode)] <- 0
+felce_v_encode <- na.omit(felce_v_encode)
+
+felce_v_encode_atlas <- merge(felce_v_encode, atlas, by="gene", all=TRUE)
+
+felce_v_encode_atlas <- felce_v_encode_atlas %>%
+  mutate(atlas_counts = counts) %>%
+  select(-counts)
+
+felce_v_encode_atlas[is.na(felce_v_encode_atlas)] <- 0
+felce_v_encode_atlas <- na.omit(felce_v_encode_atlas)
+
+felce_venn <- (felce_v_encode_atlas$felce_counts > 10)
+encode_venn <- (felce_v_encode_atlas$encode_counts > 0.05)
+atlas_venn <- (felce_v_encode_atlas$atlas_counts > 0.05)
+
+c2 <- cbind(felce_venn, encode_venn, atlas_venn)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/1_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/1_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+felce_v_encode_atlas <- ensembl_to_symbol(felce_v_encode_atlas, "gene")
+comparison_1 <- felce_v_encode_atlas[complete.cases(felce_v_encode_atlas),]
+
+
+write.csv(comparison_1, file="venn/1_list.csv")
+```
+

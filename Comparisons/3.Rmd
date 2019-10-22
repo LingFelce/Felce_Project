@@ -1,0 +1,103 @@
+---
+title: "Comparison 3"
+output: html_document
+---
+
+
+Update: 18th July 2019
+
+# Comparison 3: Lucic resting v Zhao 0h
+Using raw read counts or FPKM
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+library(readr)
+```
+
+```{r lucic}
+
+#Upload Lucic genes and keep resting samples only
+lucic_original <- read_csv("lucic_genes.csv")
+lucic_resting <- lucic_original[c("Geneid","41_resting","42_resting","44_resting")]
+
+#Remove rows of less than 10
+lucic_resting <- lucic_resting[rowSums(lucic_resting < 10)==0, ]
+
+#Average resting counts 
+lucic_resting$counts <- rowMeans(lucic_resting[c("41_resting","42_resting","44_resting")])
+
+```
+
+```{r zhao}
+#Upload Zhao genes
+zhao_original <- read_csv ("zhao_genes.csv")
+zhao_edit <- zhao_original[c("Geneid","0h 1","0h 2")]
+
+#Remove rows of less than 10
+zhao_edit <- zhao_edit[rowSums(zhao_edit < 10)==0, ]
+
+#Convert type from "character" to "numeric"
+zhao_edit[2:3] <- sapply(zhao_edit[2:3], as.numeric)
+
+#Average resting counts 
+zhao_edit$counts <- rowMeans(zhao_edit[c("0h 1","0h 2")])
+
+```
+
+# Venn diagrams
+ 
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+lucic <- lucic_resting %>% 
+  select(Geneid, counts)
+zhao <- zhao_edit %>% 
+  select(Geneid, counts)
+
+lucic_v_zhao <- merge(lucic, zhao, by="Geneid", all = TRUE)
+
+lucic_v_zhao <- lucic_v_zhao %>% 
+  mutate(lucic_counts = counts.x, zhao_counts = counts.y) %>% 
+  select(-counts.x, -counts.y)
+
+lucic_v_zhao[is.na(lucic_v_zhao)] <- 0
+lucic_v_zhao <- na.omit(lucic_v_zhao)
+
+lucic_venn <- (lucic_v_zhao$lucic_counts > 10)
+zhao_venn <- (lucic_v_zhao$zhao_counts > 0.05)
+
+
+c2 <- cbind(lucic_venn, zhao_venn)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/3_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/3_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+lucic_v_zhao <- ensembl_to_symbol(lucic_v_zhao, "Geneid")
+comparison_3 <- lucic_v_zhao[complete.cases(lucic_v_zhao),]
+
+
+write.csv(comparison_3, file="venn/3_list.csv")
+```
+
