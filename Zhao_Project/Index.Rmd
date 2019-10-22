@@ -1,0 +1,12 @@
+---
+title: "Zhao Project"
+output: html_document
+---
+
+
+# RNA-Seq Analysis for Zhao Project:
+
+0 hours vs 2 hours
+
+0 hours vs 24 hours
+

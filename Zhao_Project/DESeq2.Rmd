@@ -1,0 +1,537 @@
+---
+title: "Differential expression using DESeq2"
+output: html_document
+---
+
+
+Update: 2nd July 2019
+
+# Differential gene expression using DESeq2
+Differential gene expression using DESeq2 and visualisation with Venn diagrams. Using Adam's code, some from https://www.bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+
+If need to use Biomart to map gene symbols from Ensembl IDs, then use functions_biomart.R instead of functions.R
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+library(readr)
+```
+
+
+```{r read count and metadata}
+#Upload read count file
+
+library(readr)
+df_mRNA <- read_csv("genes.csv")
+
+
+#Upload meta data file
+meta_data <- read.table("meta_data.csv", sep=",", header = TRUE)
+
+#Change row names to become sample names
+rownames(meta_data) <- meta_data$Sample
+
+#Remove any rows with #N/A value
+gene_counts <- df_mRNA[rowSums(df_mRNA == "#N/A")==0, , drop = FALSE]
+
+#Convert row names to Ensembl IDs
+rownames(gene_counts) <- gene_counts$Geneid
+
+#Rename column names after sample names from meta data, get rid of Geneid (Ensembl ID)
+
+gene_counts$Geneid <- NULL
+
+names(gene_counts)[1:12]<-rownames(meta_data)
+
+#df_mRNA = df_mRNA[,rownames(meta_data)]
+
+#Do rownames of metadata match column names of read count file
+all(rownames(meta_data) %in% colnames(gene_counts))
+
+#Seems to think that count matrix has characters, so convert to all numbers
+counts <- type.convert(gene_counts)
+
+#Doesn't seem to allow setting Symbols as row names as says duplicate row names not allowed.
+
+#convert Ensembl ID to gene symbol here
+#df_mRNA$Symbol <- mapIds(org.Hs.eg.db, keys=as.character(df_mRNA$Geneid), keytype="ENSEMBL", column="SYMBOL")
+
+#Get rid of any rows with NA
+#df_mRNA <- df_mRNA[!is.na(df_mRNA$Symbol), ]
+
+
+```
+
+
+```{r metadata}
+# set up meta_data for all experiments (have 2 comparisons)
+
+meta_data_1 <- meta_data %>% 
+  filter(Cell_line == "CD4") %>% 
+  column_to_rownames("Samples")
+
+#meta_data_2 <- meta_data %>%
+  #filter (Cell_line =="CD4") %>%
+  #column_to_rownames("Samples")
+
+
+
+```
+
+
+```{r DESeq}
+## Set up the DESeq2 object
+
+run_deseq2 <- function(df_mRNA, meta_data, control="resting", test="stim", value){
+
+  df_mRNA = df_mRNA[,rownames(meta_data)]
+  
+  
+  dds<- DESeqDataSetFromMatrix(countData=df_mRNA,
+                               colData=meta_data,
+                               design= ~Condition)
+  
+  keep <- rowSums(counts(dds)) >= 10
+  dds <- dds[keep,]
+  
+  dds <- DESeq(dds)
+  
+  res <- results(dds, contrast = c(value, test,control))
+  
+  return(res)
+}
+
+
+res_2h <- run_deseq2(as.data.frame(counts), meta_data_1, control = "resting", test="2h_activated", value="Condition")
+
+#Keep code below if running multiple comparisons
+
+#Too many objects called res later, so this "master" results is de_res (differential expression results. Obviously)
+
+
+res_24h <- run_deseq2(as.data.frame(counts), meta_data_1, control = "resting", test="24h_activated", value="Condition")
+
+
+
+```
+
+The following describes the analysis of the data using DEseq2. I have separated the analyses into the four different contrasts and have plotted summary statistics and MA plots for each.  
+
+
+## Summary of the data {.tabset .tabset-fade}
+
+### Resting vs 2 hr Activated CD4 T cells
+
+```{r 2h summary}
+summary(res_2h, alpha=0.05)
+```
+
+### Resting vs 24 hr Activated CD4 T cells
+
+```{r 24h summary}
+summary(res_24h, alpha=0.05)
+```
+
+
+## MA (mean average) plots {.tabset .tabset-fade}
+
+In DESeq2, the function plotMA shows the log2 fold changes attributable to a given variable over the mean of normalized counts for all the samples in the DESeqDataSet. Points will be colored red if the adjusted p value is less than 0.01. Points which fall out of the window are plotted as open triangles pointing either up or down.
+
+### Resting vs 2 hr Activated CD4 T cells
+
+```{r 2h MA plot}
+DESeq2::plotMA(res_2h)
+```
+
+### Resting vs 24 hr Activated CD4 T cells
+
+```{r 24h MA plot}
+DESeq2::plotMA(res_24h)
+```
+
+
+
+# Volcano plots {.tabset .tabset-fade}
+
+## Resting vs 2 hr Activated CD4 T cells
+
+```{r 2h volcano}
+
+library("ggplot2") #Best plots
+library("ggrepel") #Avoid overlapping labels
+
+
+test <- as.data.frame(res_2h)
+  
+data <- as.vector(rownames(test))
+annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   columns="SYMBOL", keytype = "ENSEMBL")
+  
+result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+res <- result %>% 
+    dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    na.omit()
+  
+
+mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+input <- cbind(gene=rownames(mutateddf), mutateddf )
+input <- input %>% 
+  arrange(input$padj)
+
+symbol_data <- head(input, 100)
+
+#convert the rownames to a column
+volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    geom_point(aes(col=sig)) + #add points colored by significance
+geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      ggtitle("Resting vs 2 hour Activated") #e.g. 'Volcanoplot DESeq2'
+volc
+
+#Save Volcano Plot
+ggsave("volcano/restv2hplot.jpeg", device="jpeg") #In case you want to easily save to disk
+
+
+```
+
+## Resting vs 24 hr Activated CD4 T cells
+
+```{r 24h volcano}
+
+library("ggplot2") #Best plots
+library("ggrepel") #Avoid overlapping labels
+
+
+test <- as.data.frame(res_24h)
+  
+data <- as.vector(rownames(test))
+annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   columns="SYMBOL", keytype = "ENSEMBL")
+  
+result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+res <- result %>% 
+    dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    na.omit()
+  
+
+mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+input <- cbind(gene=rownames(mutateddf), mutateddf )
+input <- input %>% 
+  arrange(input$padj)
+
+symbol_data <- head(input, 100)
+
+#convert the rownames to a column
+volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    geom_point(aes(col=sig)) + #add points colored by significance
+geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      ggtitle("Resting vs 24 hours Activated") #e.g. 'Volcanoplot DESeq2'
+volc
+
+#Save Volcano Plot
+ggsave("volcano/restv24hplot.jpeg", device="jpeg") #In case you want to easily save to disk
+
+
+```
+
+
+# Results tables
+
+The folowing results tables show the significant genes. Filtering has been performed with a log2 fold change +/- 2.
+
+
+### Resting vs 2 hr Activated CD4 T cells
+
+```{r 2h significant genes export}
+
+
+dt <- filter_genes(as.data.frame(res_2h), name="rest_vs_2h")
+
+
+
+
+
+datatable(dt$sig)
+
+
+```
+
+
+### Resting vs 2 hr Activated CD4 T cells
+
+```{r 24h significant genes export}
+dt <- filter_genes(as.data.frame(res_24h), name="rest_vs_24h")
+
+
+datatable(dt$sig)
+```
+# Separate +/- 1 log2 fold change
+```{r separate up or downregulated}
+
+# Merge the data for Venn diagram
+CD4_2h <- as.data.frame(res_2h)
+CD4_24h <- as.data.frame(res_24h)
+
+
+# downregulated ("genes" = rownames)
+
+CD4_2h_down <- CD4_2h %>% 
+  rownames_to_column("gene") %>% 
+  filter(log2FoldChange < -1)
+
+CD4_24h_down <- CD4_24h %>% 
+  rownames_to_column("gene") %>% 
+  filter(log2FoldChange < -1)
+
+
+
+# upregulated
+
+CD4_2h_up <- CD4_2h %>% 
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange > 1)
+
+CD4_24h_up <- CD4_24h %>% 
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange > 1)
+
+
+```
+
+# Venn diagrams
+### Shared downregulated genes CD4 T cells after 2 or 24 hours activation
+
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+CD4_2h_down <- CD4_2h_down %>% 
+  select(gene, log2FoldChange)
+CD4_24h_down <- CD4_24h_down %>% 
+  select(gene, log2FoldChange)
+
+merge_down <- merge(CD4_2h_down, CD4_24h_down, by="gene", all = TRUE)
+
+merge_down <- merge_down %>% 
+  mutate(CD4_2h_LFC = log2FoldChange.x, CD4_24h_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_down[is.na(merge_down)] <- 0
+
+cd4_2h <- (merge_down$CD4_2h_LFC < -1)
+cd4_24h <- (merge_down$CD4_24h_LFC < -1)
+
+c2 <- cbind(cd4_2h, cd4_24h)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/downregulated_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/downregulated_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_down <- ensembl_to_symbol(merge_down, "gene")
+down <- merge_down[complete.cases(merge_down),]
+
+
+write.csv(down, file="venn/down.csv")
+```
+
+### Shared upregulated genes CD4 T cells after 2 or 24 hours activation
+
+```{r venn up}
+
+library(reshape)
+library(reshape2)
+
+
+CD4_2h_up <- CD4_2h_up %>% 
+  select(gene, log2FoldChange)
+CD4_24h_up <- CD4_24h_up %>% 
+  select(gene, log2FoldChange)
+
+merge_up <- merge(CD4_2h_up, CD4_24h_up, by="gene", all = TRUE)
+
+merge_up <- merge_up %>% 
+  mutate(CD4_2h_LFC = log2FoldChange.x, CD4_24h_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_up[is.na(merge_up)] <- 0
+
+cd4_2h <- (merge_up$CD4_2h_LFC > 1)
+cd4_24h <- (merge_up$CD4_24h_LFC > 1)
+
+c2 <- cbind(cd4_2h, cd4_24h)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/upregulated_venn.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/upregulated_venn.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_up <- ensembl_to_symbol(merge_up, "gene")
+up <- merge_up[complete.cases(merge_up),]
+
+
+write.csv(up, file="venn/up.csv")
+
+```
+
+# Separate by +/- 0 log2 fold change
+Update: 18th July 2019
+
+```{r separate up or down}
+
+# Merge the data for Venn diagram
+CD4_2h <- as.data.frame(res_2h)
+CD4_24h <- as.data.frame(res_24h)
+
+
+# downregulated ("genes" = rownames)
+
+CD4_2h_down <- CD4_2h %>% 
+  rownames_to_column("gene") %>% 
+  filter(log2FoldChange < 0)
+
+CD4_24h_down <- CD4_24h %>% 
+  rownames_to_column("gene") %>% 
+  filter(log2FoldChange < 0)
+
+
+
+# upregulated
+
+CD4_2h_up <- CD4_2h %>% 
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange > 0)
+
+CD4_24h_up <- CD4_24h %>% 
+  rownames_to_column("gene") %>%
+  filter(log2FoldChange > 0)
+
+
+```
+
+# Venn diagrams
+### Shared downregulated genes CD4 T cells after 2 or 24 hours activation
+
+```{r venn down}
+library(reshape)
+library(reshape2)
+
+
+CD4_2h_down <- CD4_2h_down %>% 
+  select(gene, log2FoldChange)
+CD4_24h_down <- CD4_24h_down %>% 
+  select(gene, log2FoldChange)
+
+merge_down <- merge(CD4_2h_down, CD4_24h_down, by="gene", all = TRUE)
+
+merge_down <- merge_down %>% 
+  mutate(CD4_2h_LFC = log2FoldChange.x, CD4_24h_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_down[is.na(merge_down)] <- 0
+
+cd4_2h <- (merge_down$CD4_2h_LFC < 0)
+cd4_24h <- (merge_down$CD4_24h_LFC < 0)
+
+c2 <- cbind(cd4_2h, cd4_24h)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/downregulated_venn_new.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/downregulated_venn_new.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_down <- ensembl_to_symbol(merge_down, "gene")
+down <- merge_down[complete.cases(merge_down),]
+
+
+write.csv(down, file="venn/down_new.csv")
+```
+
+### Shared upregulated genes CD4 T cells after 2 or 24 hours activation
+
+```{r venn up}
+
+library(reshape)
+library(reshape2)
+
+
+CD4_2h_up <- CD4_2h_up %>% 
+  select(gene, log2FoldChange)
+CD4_24h_up <- CD4_24h_up %>% 
+  select(gene, log2FoldChange)
+
+merge_up <- merge(CD4_2h_up, CD4_24h_up, by="gene", all = TRUE)
+
+merge_up <- merge_up %>% 
+  mutate(CD4_2h_LFC = log2FoldChange.x, CD4_24h_LFC = log2FoldChange.y) %>% 
+  select(-log2FoldChange.x, -log2FoldChange.y)
+
+merge_up[is.na(merge_up)] <- 0
+
+cd4_2h <- (merge_up$CD4_2h_LFC > 0)
+cd4_24h <- (merge_up$CD4_24h_LFC > 0)
+
+c2 <- cbind(cd4_2h, cd4_24h)
+
+a <- vennCounts(c2)
+a
+
+library("RColorBrewer")
+library(wesanderson)
+c("red", "blue", "darkgreen", "yellow")
+
+tiff("venn/upregulated_venn_new.tiff")
+vennDiagram(a, circle.col = wes_palette("Darjeeling1"))
+#dev.off()
+knitr::include_graphics("venn/upregulated_venn_new.tiff")
+
+
+
+# Next subset the overlapping genes for all
+
+merge_up <- ensembl_to_symbol(merge_up, "gene")
+up <- merge_up[complete.cases(merge_up),]
+
+
+write.csv(up, file="venn/up_new.csv")
+
+```
