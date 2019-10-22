@@ -1,0 +1,250 @@
+---
+title: "GO"
+output: html_document
+---
+Update: 3rd July 2019
+
+# Gene ontology and gene set enrichment analysis
+Pathway analysis using code from Rbio Session 4. Gene ontology, network analysis and gene set enrichment analysis using FGSEA (https://bioconductor.org/packages/release/bioc/vignettes/fgsea/inst/doc/fgsea-tutorial.html) - doesn't produce as nice enrichment plots as GSEA GUI, also have to do individually for each DE gene list.
+
+
+```{r, include=FALSE}
+
+library(limma)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(pathview)
+library(fgsea)
+
+#Go to Rbio.Rmd file to load full list, including installing packages etc. If having trouble, install individual packages using CRAN within R Studio. If still having trouble, then have to search Bioconductor for it.
+
+```
+## Resting vs Activated CD4 T Cells - using DESeq2 gene list
+
+### Filter data (process data)
+The data contains double entries or NA entries. We need to remove these for downstream analysis.
+
+```{r 2h import data}
+
+#Import significant results from DESeq2 analysis 
+
+library(readr)
+sig <- read_csv("results/rest_vs_activated_sig.csv")
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+
+sig$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(sig$Row.names), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+sig <- sig[is.na(sig$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+sig <- sig[!duplicated(sig$Entrez.Gene),]
+
+```
+
+### Gene Ontology (GO) over-representation test
+We are going to perform an over-representation test for our genes in GO terms from org.Hs.eg.db
+
+```{r GO test}
+#Change Entrez IDs from numbers to characters
+
+geneset <- as.character(sig$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(geneset)
+
+#This will take a little while to run
+ego <- enrichGO(gene = geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+#dimensions - number of GO terms
+dim(ego)
+
+head(ego)
+#GeneRatio - how may times appear in gene list
+#BgRatio - how many times appear in universe
+
+#Export list of biological processes and genes involved
+GOgenes <- data.frame(ego$ID, ego$Description, ego$p.adjust, ego$geneID)
+
+write.csv(GOgenes, file="GO/rest_vs_activated_BP.csv")
+
+
+```
+### Showing the ego object in graphical form
+
+```{r barplot and dotplot,fig.height=6, fig.width=8}
+barplot (ego, showCategory = 10)
+
+dotplot (ego, showCategory=10)
+
+#can use simplify() to remove redundant terms, but can be slow eg barplot(simplify(ego))
+
+```
+
+
+We can look into the relation of the enriched GO terms using the `emapplot()` function. You will need to increase the height and width of the image so that the terms don't overlap.  
+
+```{r GO terms relationship, fig.height=12, fig.width=14}
+emapplot(ego)
+
+```
+
+We can use cnetplot() to display the relation of specific genes within the GO terms.
+
+```{r genes in GO terms, fig.height=20, fig.width=14}
+#logFC is optional, but if available will colour-code the nodes
+logFC <- sig$log2FoldChange
+#set name of object
+names(logFC) <- sig$Entrez.Gene
+head(logFC)
+
+cnetplot(ego, foldChange = logFC, showCategory = 5, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+
+```
+
+### Gene Set Enrichment Analysis (GSEA)
+GSEA is a method for testing the expression of focused gene sets in gene expression data. In contrast to the over-representation tests we have seen, GSEA considers all genes in the data, so there is no need for an arbitary cutoff.
+
+```{r reactome barplot}
+#For running GSEA with the fgsea() function, we need to specify a list of gene sets (could also be pathways) and a metric that will be used to rank the data. Here we are using fold change and reactome pathways.
+
+pathways <- reactomePathways (names(logFC))
+
+#"pathways" has to be named list of gene sets
+length(pathways)
+
+#Here we are using logFC for ranking the genes
+ranks <- logFC
+
+#This is to demonstrate ranked data - ranked gene list
+barplot(sort(ranks, decreasing=T))
+
+
+```
+### Exploring the results - Reactome Pathways
+
+``` {r reactome plots}
+#fgsea will perform GSEA
+#install packages stats, DOSE, colorspace
+
+gsea_results <- fgsea(pathways = pathways,
+                      stats = ranks,
+                      minSize =10,
+                      maxSize = 500,
+                      nperm=10000)
+
+colnames(gsea_results)
+
+dim(gsea_results)
+
+head(gsea_results)
+
+#results from fgsea function are in same order as pathways. We might need to filter or rank them depending on ES and padj. 
+
+significant <-gsea_results$padj <=0.05
+
+gsea_significant<-gsea_results[significant,]
+
+
+#order results based on ES score
+ES_order <- order(gsea_significant$ES, decreasing=TRUE)
+
+gsea_ordered <- gsea_significant[ES_order]
+
+gsea_ordered
+
+#to export, copy and paste table into Excel - doesn't like write.csv command as list of genes in last column.
+
+#visualise GSEA results for some of these pathways - top 5
+
+plotEnrichment(pathways[["Unwinding of DNA"]], ranks)
+plotEnrichment(pathways[["Response to metal ions"]], ranks)
+plotEnrichment(pathways[["Polo-like kinase mediated events"]], ranks)
+plotEnrichment(pathways[["Chk1/Chk2(Cds1) mediated inactivation of Cyclin B:Cdk1 complex"]], ranks)
+plotEnrichment(pathways[["RNA Polymerase I Promoter Opening"]], ranks)
+
+
+```
+
+### Using genesets from MsigDB for GSEA
+
+The MSigDB is a collection of annotated gene sets. Different parts of MSigDB are available in  [http://software.broadinstitute.org/gsea/downloads.jsp](http://software.broadinstitute.org/gsea/downloads.jsp).
+
+
+```{r load hallmark}
+#downloaded hallmark gene sets, Entrez IDs
+
+h_all <- read.gmt(gmtfile="MSigDB/h.all.v6.2.entrez.gmt")
+
+
+dim(h_all)
+
+head(h_all)
+
+#create an empty list first
+pathways<-list()
+
+#separate gene sets and add as named elements of the list
+for (gs in unique (h_all$ont)){
+  gs_ids <- h_all$ont == gs
+  pathways[[gs]] <- h_all$gene[gs_ids]
+}
+
+```
+
+
+Now, we can do GSEA with the pathways from MSigDB.
+
+```{r hallmark plots}
+
+gsea_results <- fgsea(pathways=pathways,
+                      stats=ranks,
+                      minSize=10,
+                      maxSize=500,
+                      nperm=10000)
+                     
+
+dim(gsea_results)
+
+#keep significant genesets and test order based on ES
+
+significant <- gsea_results$padj <0.05
+
+gsea_significant <- gsea_results[significant,]
+
+ES_order<- order(gsea_significant$ES, decreasing=TRUE)
+
+gsea_ordered<-gsea_significant[ES_order,]
+
+gsea_ordered
+
+#Plot GSEA plots - top 5
+plotEnrichment(pathways[["HALLMARK_E2F_TARGETS"]],ranks)
+plotEnrichment(pathways[["HALLMARK_G2M_CHECKPOINT"]],ranks)
+plotEnrichment(pathways[["HALLMARK_MYC_TARGETS_V2"]],ranks)
+plotEnrichment(pathways[["HALLMARK_MYC_TARGETS_V1"]],ranks)
+plotEnrichment(pathways[["HALLMARK_MITOTIC_SPINDLE"]],ranks)
+
+#copy and paste gsea_ordered into Excel spreadsheet
+
+#If want to find out genes involved - copy Entrez IDs from Excel
+#entrez_ids <- c("1282","1284","4323","131578","1809","7058","7474","2335","2619","627","7857","2191","1009","3371","2200","4312","4638","6695","5396","23705","11167","1303","3569")
+
+#Convert to symbols using Hs database, then copy and paste into Excel
+#symbols <- mapIds(org.Hs.eg.db, keys=as.character(entrez_ids), keytype="ENTREZID", column="SYMBOL")
+
+#symbols
+
+```
+

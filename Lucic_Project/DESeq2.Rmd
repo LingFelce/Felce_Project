@@ -1,0 +1,193 @@
+---
+title: "Differential expression using DESeq2"
+output: html_document
+---
+
+
+Update: 3rd July 2019
+
+# Differential gene expression using DESeq2
+Differential gene expression using DESeq2 and visualisation with Venn diagrams. Using Adam's code, some from https://www.bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+
+If need to use Biomart to map gene symbols from Ensembl IDs, then use functions_biomart.R instead of functions.R
+
+```{r, include=FALSE}
+source('functions.R')
+library(org.Hs.eg.db)
+library(DESeq2)
+library(pheatmap)
+library(tidyverse)
+library(DT)
+library(limma)
+library(pheatmap)
+```
+
+
+```{r read count and metadata}
+#Upload read count file
+df_mRNA <- read.table ("genes.csv", sep=",", header=TRUE, nrows=63677)
+
+#Upload meta data file
+meta_data <- read.table("meta_data.csv", sep=",", header = TRUE)
+
+#Change row names to become sample names
+rownames(meta_data) <- meta_data$Sample
+
+#Convert row names to Ensembl IDs
+rownames(df_mRNA) <- df_mRNA$Geneid
+
+#Rename column names after sample names from meta data, get rid of Geneid (Ensembl ID)
+
+df_mRNA$Geneid <- NULL
+
+names(df_mRNA)[1:6]<-rownames(meta_data)
+
+#df_mRNA = df_mRNA[,rownames(meta_data)]
+
+#Do rownames of metadata match column names of read count file
+all(rownames(meta_data) %in% colnames(df_mRNA))
+
+```
+
+
+```{r metadata}
+# set up meta_data for all experiments (only have 1 comparison)
+
+meta_data_1 <- meta_data %>% 
+  filter(Cell_line == "CD4") %>% 
+  column_to_rownames("Samples")
+
+#meta_data_2 <- meta_data %>%
+  #filter (Cell_line =="CD4") %>%
+  #column_to_rownames("Samples")
+
+
+
+```
+
+
+```{r DESeq}
+## Set up the DESeq2 object
+
+run_deseq2 <- function(df_mRNA, meta_data, control="Resting", test="Activated", value){
+
+  df_mRNA = df_mRNA[,rownames(meta_data)]
+  
+  
+  dds<- DESeqDataSetFromMatrix(countData=df_mRNA,
+                               colData=meta_data,
+                               design= ~Condition)
+  
+  keep <- rowSums(counts(dds)) >= 10
+  dds <- dds[keep,]
+  
+  dds <- DESeq(dds)
+  
+  res <- results(dds, contrast = c(value, test,control))
+  
+  return(res)
+}
+
+
+de_res <- run_deseq2(as.data.frame(df_mRNA), meta_data_1, control = "Resting", test="Activated", value="Condition")
+
+#Keep code below if running multiple comparisons
+
+#Too many objects called res later, so this "master" results is de_res (differential expression results. Obviously)
+
+
+#res_24h <- run_deseq2(as.data.frame(counts), meta_data_1, control = "resting", test="24h_activated", value="Condition")
+
+
+
+```
+
+The following describes the analysis of the data using DEseq2. I have separated the analyses into the four different contrasts and have plotted summary statistics and MA plots for each.  
+
+
+## Summary of the data {.tabset .tabset-fade}
+
+### Resting vs Activated CD4 T cells
+
+```{r summary}
+summary(de_res, alpha=0.05)
+```
+
+
+## MA (mean average) plots {.tabset .tabset-fade}
+
+In DESeq2, the function plotMA shows the log2 fold changes attributable to a given variable over the mean of normalized counts for all the samples in the DESeqDataSet. Points will be colored red if the adjusted p value is less than 0.01. Points which fall out of the window are plotted as open triangles pointing either up or down.
+
+### Resting vs Activated CD4 T cells
+
+```{r MA plot}
+DESeq2::plotMA(de_res)
+```
+
+
+
+
+# Volcano plots {.tabset .tabset-fade}
+
+## Resting vs Activated CD4 T cells
+
+```{r volcano}
+
+library("ggplot2") #Best plots
+library("ggrepel") #Avoid overlapping labels
+
+
+test <- as.data.frame(de_res)
+  
+data <- as.vector(rownames(test))
+annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   columns="SYMBOL", keytype = "ENSEMBL")
+  
+result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+res <- result %>% 
+    dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    na.omit()
+  
+
+mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+input <- cbind(gene=rownames(mutateddf), mutateddf )
+input <- input %>% 
+  arrange(input$padj)
+
+symbol_data <- head(input, 100)
+
+#convert the rownames to a column
+volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    geom_point(aes(col=sig)) + #add points colored by significance
+geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      ggtitle("Resting vs Activated") #e.g. 'Volcanoplot DESeq2'
+volc
+
+#Save Volcano Plot
+ggsave("volcano/restvsactivatedplot.jpeg", device="jpeg") #In case you want to easily save to disk
+
+
+```
+
+
+# Results tables
+
+The folowing results tables show the significant genes. Filtering has been performed with a log2 fold change +/- 2.
+
+
+### Resting vs Activated CD4 T cells
+
+```{r 2h significant genes export}
+
+
+dt <- filter_genes(as.data.frame(de_res), name="rest_vs_activated")
+
+
+
+
+
+datatable(dt$sig)
+
+
+```
+

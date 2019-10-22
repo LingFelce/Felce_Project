@@ -1,0 +1,10 @@
+---
+title: "Lucic Project"
+output: html_document
+---
+
+
+# RNA-Seq Analysis for Zhao Project:
+
+Resting vs Activated CD4 T cells
+
