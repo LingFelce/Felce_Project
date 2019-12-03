@@ -1,0 +1,185 @@
+---
+title: "A"
+output: html_document
+---
+
+# Gene ontology and gene set enrichment analysis
+Pathway analysis using code from Rbio Session 4. Gene ontology, network analysis and gene set enrichment analysis using ClusterProfiler.
+
+Update: 3rd December 2019
+
+Analysis - 2 gene lists, Jurkats only and CD4+ cells only
+
+Note: used simplify() for analysis - if editing and want to Knit to HTML, will take a long time!
+
+
+```{r, include=FALSE}
+
+library(limma)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(pathview)
+library(fgsea)
+library(readr)
+
+#Go to Rbio.Rmd file to load full list, including installing packages etc. If having trouble, install individual packages using CRAN within R Studio. If still having trouble, then have to search Bioconductor for it.
+
+```
+# Data editing to read in separate gene lists
+```{r}
+
+jurkat <- read.csv("total_results/jurkats_only.csv", header=FALSE)
+names(jurkat)[1] <- "ensembl"
+
+cd4 <- read.csv("total_results/cd4_only.csv", header=FALSE)
+names(cd4)[1] <- "ensembl"
+
+
+```
+
+# Gene Ontology
+
+## Jurkat only
+
+Filter data
+```{r}
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+jurkat$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(jurkat$ensembl), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+jurkat <- jurkat[is.na(jurkat$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+jurkat <- jurkat[!duplicated(jurkat$Entrez.Gene),]
+
+```
+
+### Gene Ontology (GO) over-representation test - Jurkat only, Biological Process
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+jurkat_geneset <- as.character(jurkat$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(jurkat_geneset)
+
+#This will take a little while to run
+jurkat_ego <- enrichGO(gene = jurkat_geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+#dimensions - number of GO terms
+dim(jurkat_ego)
+
+#simplify
+simp_jurkat_ego <- simplify(jurkat_ego)
+
+dim(simp_jurkat_ego)
+
+#Export list of biological processes and genes involved
+jurkat_BP <- data.frame(simp_jurkat_ego$ID, simp_jurkat_ego$Description, simp_jurkat_ego$p.adjust, simp_jurkat_ego$geneID)
+
+write.csv(jurkat_BP, file="GO/jurkat_BP_simplified.csv")
+
+```
+
+```{r,fig.height=6, fig.width=8}
+barplot (simp_jurkat_ego, showCategory = 10)
+
+dotplot (simp_jurkat_ego, showCategory=10)
+
+```
+
+```{r, fig.height=10, fig.width=10}
+emapplot(simp_jurkat_ego)
+
+```
+
+```{r, fig.height=12, fig.width=14}
+#no logfc information available
+
+cnetplot(simp_jurkat_ego, showCategory = 5, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
+
+## CD4 only
+
+Filter data
+```{r}
+
+#Use Ensembl IDs to map Entrez Gene IDs. Use #keytypes(org.Hs.eg.db) to check what column names are
+cd4$Entrez.Gene <- mapIds(org.Hs.eg.db, keys=as.character(cd4$ensembl), keytype="ENSEMBL", column="ENTREZID")
+
+#Keep only rows from table without NAs
+cd4 <- cd4[is.na(cd4$Entrez.Gene)==FALSE,]
+
+#Remove duplicated entries
+cd4 <- cd4[!duplicated(cd4$Entrez.Gene),]
+
+```
+
+### Gene Ontology (GO) over-representation test - CD4 only, Biological Process
+
+```{r}
+#Change Entrez IDs from numbers to characters
+
+cd4_geneset <- as.character(cd4$Entrez.Gene)
+
+#This will show Entrez IDs only
+head(cd4_geneset)
+
+#This will take a little while to run
+cd4_ego <- enrichGO(gene = cd4_geneset, 
+                universe = NULL, #all available genes in database
+                OrgDb = org.Hs.eg.db, #Hs: homo sapiens
+                ont ="BP", #molecular function, biological process, cellular component
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01,
+                qvalueCutoff = 0.05,  #q value is FDR adjusted p value
+                readable = TRUE) #will show gene symbol in images later rather than Entrez Gene ID
+
+#dimensions - number of GO terms
+dim(cd4_ego)
+
+#98 terms - no need to simplify
+#simp_cd4_ego <- simplify(cd4_ego)
+
+
+#Export list of biological processes and genes involved
+cd4_BP <- data.frame(cd4_ego$ID, cd4_ego$Description, cd4_ego$p.adjust, cd4_ego$geneID)
+
+write.csv(cd4_BP, file="GO/cd4_BP.csv")
+
+```
+
+```{r,fig.height=6, fig.width=8}
+barplot (cd4_ego, showCategory = 10)
+
+dotplot (cd4_ego, showCategory=10)
+
+```
+
+```{r, fig.height=10, fig.width=10}
+emapplot(cd4_ego)
+
+```
+
+```{r, fig.height=12, fig.width=12}
+#no logfc information available
+
+cnetplot(cd4_ego, showCategory = 5, circular = FALSE)
+#show 5 GO terms, if set circular to TRUE then GO terms won't be in middle, will be on edge of circle
+#size = number of genes, fold change = red for upregulated, green for downregulated
+
+```
+
