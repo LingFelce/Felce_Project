@@ -5,6 +5,7 @@ output: html_document
 
 
 Update: 1st July 2019
+Update: 5th December 2019 - stim vs soluble
 
 # Differential gene expression using DESeq2
 Differential gene expression using DESeq2 and visualisation with Venn diagrams. Using Adam's code, some from https://www.bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
@@ -20,6 +21,7 @@ library(tidyverse)
 library(DT)
 library(limma)
 library(pheatmap)
+library(dplyr)
 ```
 
 
@@ -58,7 +60,7 @@ all(rownames(meta_data) %in% colnames(df_mRNA))
 
 
 ```{r metadata}
-# set up meta_data for all experiments (only have 1 comparison)
+# set up meta_data for all experiments (only have 1 comparison/metadata sheet)
 
 meta_data_1 <- meta_data %>% 
   filter(Cell_line == "Jurkat") %>% 
@@ -103,7 +105,7 @@ de_res <- run_deseq2(as.data.frame(gene_counts), meta_data_1, control = "resting
 
 #Too many objects called res later, so this "master" results is de_res (differential expression results. Obviously)
 
-#res <- run_deseq2(as.data.frame(genes), meta_data_1, control = "neg", test="ko2", value="Condition")
+stim_res <- run_deseq2(as.data.frame(gene_counts), meta_data_1, control = "soluble", test="stim", value="Condition")
 
 
 
@@ -120,10 +122,10 @@ The following describes the analysis of the data using DEseq2. I have separated 
 summary(de_res, alpha=0.05)
 ```
 
-### Other comparisons
+### Stimulated vs Soluble Jurkats
 
 ```{r}
-#summary(res, alpha=0.05)
+summary(stim_res, alpha=0.05)
 ```
 
 
@@ -137,10 +139,10 @@ In DESeq2, the function plotMA shows the log2 fold changes attributable to a giv
 DESeq2::plotMA(de_res)
 ```
 
-### Other comparisons
+### Stimulated vs Soluble Jurkats
 
 ```{r}
-#DESeq2::plotMA(res)
+DESeq2::plotMA(stim_res)
 ```
 
 
@@ -190,42 +192,42 @@ ggsave("volcano/RestvsStimplot.jpeg", device="jpeg") #In case you want to easily
 
 ```
 
-## Other Comparisons
+## Stimulated vs Soluble Jurkats
 
 ```{r}
 
-#library("ggplot2") #Best plots
-#library("ggrepel") #Avoid overlapping labels
+library("ggplot2") #Best plots
+library("ggrepel") #Avoid overlapping labels
 
 
-#test <- as.data.frame(res_MCF2)
+test <- as.data.frame(stim_res)
   
-#data <- as.vector(rownames(test))
-#annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
-                                   #columns="SYMBOL", keytype = "ENSEMBL")
+data <- as.vector(rownames(test))
+annots <-  AnnotationDbi::select(org.Hs.eg.db, keys=data,
+                                   columns="SYMBOL", keytype = "ENSEMBL")
   
-#result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
-#res <- result %>% 
-    #dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
-    #na.omit()
+result <- merge(test, annots, by.x="row.names", by.y="ENSEMBL")
+res <- result %>% 
+    dplyr::select(log2FoldChange, SYMBOL, baseMean, padj, Row.names) %>% 
+    na.omit()
   
 
-#mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
-#input <- cbind(gene=rownames(mutateddf), mutateddf )
-#input <- input %>% 
-  #arrange(input$padj)
+mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
+input <- cbind(gene=rownames(mutateddf), mutateddf )
+input <- input %>% 
+  arrange(input$padj)
 
-#symbol_data <- head(input, 100)
+symbol_data <- head(input, 100)
 
 #convert the rownames to a column
-#volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
-    #geom_point(aes(col=sig)) + #add points colored by significance
-#geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
-      #ggtitle("MCF-7 MLLT1 Clone 2") #e.g. 'Volcanoplot DESeq2'
-#volc
+volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
+    geom_point(aes(col=sig)) + #add points colored by significance
+geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
+      ggtitle("Stimulated vs Soluble") #e.g. 'Volcanoplot DESeq2'
+volc
 
 #Save Volcano Plot
-#ggsave("volcano/MCF2Volcanoplot.jpeg", device="jpeg") #In case you want to easily save to disk
+ggsave("volcano/StimvsSolplot.jpeg", device="jpeg") #In case you want to easily save to disk
 
 
 ```
@@ -253,13 +255,12 @@ datatable(dt$sig)
 ```
 
 
-### Other comparisons
+### Stimulated vs Soluble Jurkats
 
 ```{r}
-#dt <- filter_genes(as.data.frame(res_MCF2), name="MCF2")
+dt <- filter_genes(as.data.frame(stim_res), name="stim_vs_sol")
 
 
-#datatable(dt$sig)
+datatable(dt$sig)
 ```
 
-No Venn diagram as only one comparison!
