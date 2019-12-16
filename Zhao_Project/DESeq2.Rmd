@@ -5,6 +5,7 @@ output: html_document
 
 
 Update: 2nd July 2019
+Update: 16th December 2019 - remove red dots from volcano plot
 
 # Differential gene expression using DESeq2
 Differential gene expression using DESeq2 and visualisation with Venn diagrams. Using Adam's code, some from https://www.bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
@@ -161,7 +162,7 @@ DESeq2::plotMA(res_24h)
 
 ## Resting vs 2 hr Activated CD4 T cells
 
-```{r 2h volcano}
+```{r 2h volcano, fig.height=8, fig.width=10}
 
 library("ggplot2") #Best plots
 library("ggrepel") #Avoid overlapping labels
@@ -180,21 +181,20 @@ res <- result %>%
   
 
 mutateddf <- mutate(res, sig=ifelse(res$padj<0.01, "padj<0.01", "Not Sig")) #Will have different colors depending on significance
-input <- cbind(gene=rownames(mutateddf), mutateddf )
-input <- input %>% 
-  arrange(input$padj)
+# input <- cbind(gene=rownames(mutateddf), mutateddf )
+# input <- input %>% 
+  # arrange(input$padj)
 
-symbol_data <- head(input, 100)
+# symbol_data <- head(input, 100)
 
 #convert the rownames to a column
 volc = ggplot(input, aes(log2FoldChange, -log10(padj))) + #volcanoplot with log2Foldchange versus pvalue
     geom_point(aes(col=sig)) + #add points colored by significance
-geom_point(data=symbol_data, aes(log2FoldChange, -log10(padj)), colour="red") +
-      ggtitle("Resting vs 2 hour Activated") #e.g. 'Volcanoplot DESeq2'
+    ggtitle("Resting vs 2 hour Activated") #e.g. 'Volcanoplot DESeq2'
 volc
 
 #Save Volcano Plot
-ggsave("volcano/restv2hplot.jpeg", device="jpeg") #In case you want to easily save to disk
+ggsave("volcano/restv2hplot_2.jpeg", device="jpeg") #In case you want to easily save to disk
 
 
 ```
