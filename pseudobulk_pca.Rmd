@@ -1,0 +1,282 @@
+---
+title: "Pseudobulk and PCA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(scater)
+library(Seurat)
+library(tidyverse)
+library(cowplot)
+library(Matrix.utils)
+library(edgeR)
+library(dplyr)
+library(magrittr)
+library(Matrix)
+library(purrr)
+library(reshape2)
+library(S4Vectors)
+library(tibble)
+library(SingleCellExperiment)
+library(pheatmap)
+# library(apeglm)
+library(png)
+library(DESeq2)
+library(RColorBrewer)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggrepel)
+library(sctransform)
+library(SeuratDisk)
+library(ggplot2)
+library(patchwork)
+```
+
+Tutorial https://hbctraining.github.io/scRNA-seq_online/lessons/pseudobulk_DESeq2_scrnaseq.html
+
+## Comparison of Jurkat cells to CD4+ T cells from PBMCs
+Use https://satijalab.org/seurat/articles/multimodal_reference_mapping.html to map unstimulated Jurkat cells to CD4+ PBMCs
+
+
+### Prepare pseudobulk
+```{r}
+# Load Seurat object
+seurat <- LoadH5Seurat("/t1-data/user/lfelce/scRNA-Seq/SmartSeq2_T-cells/pbmc_multimodal.h5seurat")
+
+# Extract raw counts and metadata to create SingleCellExperiment object
+counts <- seurat@assays$SCT@counts
+
+# much quicker way of getting all Seurat metadata instead of adding columns one by one!
+metadata <- seurat@meta.data
+
+# only select 
+metadata$cluster_id <- metadata$celltype.l1
+metadata$cluster_id <- as.factor(metadata$cluster_id)
+
+# aggregate samples -> separate different CD4+ subtypes by donor for biological replicates
+metadata <- mutate(metadata, sample_id = paste(donor, celltype.l2, sep=""))
+metadata$sample_id <- sub(" ", "", metadata$sample_id)
+metadata$sample_id <- as.factor(metadata$sample_id)
+
+# CD4+ subtypes
+metadata$group_id <- as.factor(metadata$celltype.l2)
+
+# Create single cell experiment object
+sce <- SingleCellExperiment(assays = list(counts = counts), 
+                           colData = metadata)
+
+# Identify groups for aggregation of counts
+groups <- colData(sce)[, c("cluster_id", "sample_id")]
+
+#### Acquiring necessary metrics for aggregation across cells in a sample ####
+
+# Named vector of cluster names
+kids <- purrr::set_names(levels(sce$cluster_id))
+kids
+
+# Total number of clusters
+nk <- length(kids)
+nk
+
+# Named vector of sample names
+sids <- purrr::set_names(levels(sce$sample_id))
+
+# Total number of samples 
+ns <- length(sids)
+ns
+
+##### Generate sample level metadata ####
+
+## Determine the number of cells per sample
+table(sce$sample_id)
+
+## Turn named vector into a numeric vector of number of cells per sample
+n_cells <- as.numeric(table(sce$sample_id))
+
+## Determine how to reoder the samples (rows) of the metadata to match the order of sample names in sids vector
+m <- match(sids, sce$sample_id)
+
+## Create the sample level metadata by combining the reordered metadata with the number of cells corresponding to each sample.
+ei <- data.frame(colData(sce)[m, ], n_cells, row.names = NULL) %>% dplyr::select(-"cluster_id")
+ei
+
+#### Quality control ####
+
+# Perform QC if not already performed
+dim(sce)
+
+# # Calculate quality control (QC) metrics
+# sce <- calculateQCMetrics(sce)
+# 
+# # Get cells w/ few/many detected genes
+# sce$is_outlier <- isOutlier(
+#         metric = sce$total_features_by_counts,
+#         nmads = 2, type = "both", log = TRUE)
+# 
+# # Remove outlier cells
+# sce <- sce[, !sce$is_outlier]
+# dim(sce)
+
+## Remove lowly expressed genes which have less than 10 cells with any counts
+sce <- sce[rowSums(counts(sce) > 1) >= 10, ]
+
+dim(sce)
+
+##### Aggregate the counts per sample_id and cluster_id ####
+
+# Subset metadata to only include the cluster and sample IDs to aggregate across
+groups <- SummarizedExperiment::colData(sce)[, c("cluster_id", "sample_id")]
+
+# Aggregate across cluster-sample groups
+pb <- aggregate.Matrix(t(counts(sce)), 
+                       groupings = groups, fun = "sum") 
+
+class(pb)
+
+dim(pb)
+
+pb[, 1:6]
+
+# # Not every cluster is present in all samples; create a vector that represents how to split samples
+splitf <- sapply(stringr::str_split(rownames(pb),
+                                    pattern = "_",
+                                    n = 2),
+                 `[`, 1)
+
+# Turn into a list and split the list into components for each cluster and transform, so rows are genes and columns are samples and make rownames as the sample IDs
+pb <- split.data.frame(pb, 
+                       factor(splitf)) %>%
+        lapply(function(u) 
+                set_colnames(t(u), 
+                             stringr::str_extract(rownames(u), "(?<=_)[:alnum:]+")))
+
+class(pb)
+
+# Explore the different components of list
+str(pb)
+
+# Print out the table of cells in each cluster-sample group
+options(width = 100)
+table(sce$cluster_id, sce$sample_id)
+
+#### Sample-level metadata ####
+
+# Get sample names for each of the cell type clusters
+
+# prep. data.frame for plotting
+get_sample_ids <- function(x){
+        pb[[x]] %>%
+                colnames()
+}
+
+de_samples <- map(1:length(kids), get_sample_ids) %>%
+        unlist()
+
+# Get cluster IDs for each of the samples
+samples_list <- map(1:length(kids), get_sample_ids)
+
+get_cluster_ids <- function(x){
+        rep(names(pb)[x], 
+            each = length(samples_list[[x]]))
+}
+
+de_cluster_ids <- map(1:length(kids), get_cluster_ids) %>%
+        unlist()
+
+# Create a data frame with the sample IDs, cluster IDs and condition
+gg_df <- data.frame(cluster_id = de_cluster_ids,
+                    sample_id = de_samples)
+
+gg_df <- left_join(gg_df, ei[, c("sample_id", "group_id", "donor", "celltype.l3")]) 
+
+metadata2 <- gg_df %>%
+        dplyr::select(cluster_id, sample_id, group_id, donor, celltype.l3) 
+        
+metadata2    
+
+#### Subsetting dataset to cluster of interest
+
+# Generate vector of cluster IDs
+clusters <- levels(metadata$cluster_id)
+clusters
+
+# Subset the metadata to only cells with link to T cell clones (functional avidity groups)
+cluster_metadata <- metadata2[which(metadata2$cluster_id == clusters[2]), ]
+head(cluster_metadata)
+
+# Assign the rownames of the metadata to be the sample IDs
+rownames(cluster_metadata) <- cluster_metadata$sample_id
+head(cluster_metadata)
+
+# Subset the counts to only avidity cells
+counts <- pb[[clusters[2]]]
+
+cluster_counts <- as.data.frame(counts[, which(colnames(counts) %in% rownames(cluster_metadata))])
+
+# Check that all of the row names of the metadata are the same and in the same order as the column names of the counts in order to use as input to DESeq2
+all(rownames(cluster_metadata) == colnames(cluster_counts))
+
+```
+### Prepare Jurkat counts
+```{r}
+
+jurkat <- read.csv("genes.csv")
+
+jurkat$gene <- mapIds(org.Hs.eg.db, keys=as.character(jurkat$Geneid), keytype="ENSEMBL", column="SYMBOL")
+jurkat <- na.omit(jurkat)
+# some ENSEMBL IDs map to same gene - keep rows with higher counts
+jurkat <-  jurkat[with(jurkat, order(gene, -R1, -R2)), ]
+jurkat <- jurkat[!duplicated(jurkat$gene),]
+# subset just resting
+rest <- jurkat[,c(2, 3, 10)]
+rownames(rest) <- NULL
+rest <- column_to_rownames(rest, var="gene")
+keep <- rowSums(rest) >= 10
+rest <- rest[keep,]
+rest <- rownames_to_column(rest, var="gene")
+
+cluster_counts  <- rownames_to_column(cluster_counts, var="gene")
+cluster_counts <- merge(cluster_counts, rest, by = "gene")
+
+cluster_counts <- column_to_rownames(cluster_counts, var="gene")
+
+dd <- data.frame(b = factor(c("Hi", "Med", "Hi", "Low"), 
+      levels = c("Low", "Med", "Hi"), ordered = TRUE),
+      x = c("A", "D", "A", "C"), y = c(8, 3, 9, 9),
+      z = c(1, 1, 1, 2))
+
+jurkat_metadata <- data.frame(cluster_id = c("CD4 T", "CD4 T"), 
+                              sample_id = c("R1", "R2"),
+                              group_id = c("Jurkat", "Jurkat"),
+                              donor = c("P9", "P9"),
+                              celltype.l3 = c("Jurkat", "Jurkat"))
+rownames(jurkat_metadata) <- c("R1", "R2")
+
+cluster_metadata <- rbind(cluster_metadata, jurkat_metadata)
+
+all(rownames(cluster_metadata) == colnames(cluster_counts))
+
+##### Create DESEq2 object ####
+
+dds <- DESeqDataSetFromMatrix(cluster_counts, 
+                              colData = cluster_metadata, 
+                              design = ~ group_id)
+```
+#### Clustering
+```{r}
+# Transform counts for data visualization
+rld <- rlog(dds, blind=TRUE)
+
+# Plot PCA
+DESeq2::plotPCA(rld, intgroup = "group_id")
+DESeq2::plotPCA(rld, intgroup = "donor")
+
+# Extract the rlog matrix from the object and compute pairwise correlation values
+rld_mat <- assay(rld)
+rld_cor <- cor(rld_mat)
+
+# Plot heatmap
+pheatmap(rld_cor, annotation = cluster_metadata[, c("group_id"), drop=F])
+```
+
